@@ -62,7 +62,7 @@ function simulate(mᵤ::PlannedHeadTurn,
     mₑ::ExternalDisturbance,
     sensor::Sensor;
     Δt = 0.01,
-    duration::Real = 5, 
+    duration::Real = 6, 
     stochastic::Bool = false)
 
     mᵤ = @isdefined(mᵤ) ? mᵤ : PlannedHeadTurn(A = 0)
@@ -136,7 +136,9 @@ function simulate(mᵤ::PlannedHeadTurn,
             ω = ω, 
             θ = θ, c = c, 
             Δt = Δt, onsetᵤ = onsetᵤ, onsetₑ = onsetₑ,
-            sensor = noise, stochastic = stochastic)
+            sensor = noise, 
+            mᵤ = mᵤ, mₑ = mₑ,
+            stochastic = stochastic)
     return out
 
 end
@@ -144,14 +146,14 @@ end
 simulate(mᵤ::PlannedHeadTurn,
     sensor::Sensor;
     Δt = 0.01,
-    duration::Real = 5, 
+    duration::Real = 6, 
     stochastic::Bool = false) = simulate(mᵤ, ExternalDisturbance(A = 0, duration = 0.1), sensor, 
         Δt = Δt, duration = duration, stochastic = stochastic)
 
 simulate(mₑ::ExternalDisturbance,
     sensor::Sensor;
     Δt = 0.01,
-    duration::Real = 5, 
+    duration::Real = 6, 
     stochastic::Bool = false) = simulate(PlannedHeadTurn(A = 0, duration = 0.1), mₑ, sensor, 
         Δt = Δt, duration = duration, stochastic = stochastic)
 

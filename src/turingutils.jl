@@ -16,9 +16,9 @@ function compute_stats(x::Array)
 end
 
 function get_omega(chain::Chains)   
-    w1 = Array(group(chain, :ω1))
-    w2 = Array(group(chain, :ω2))
-    w = w1 .+ w2
+    wu = Array(group(chain, :ωu))
+    we = Array(group(chain, :ωe))
+    w = wu .+ we
     return (w = w, wu = wu, we = we)
 end
 
