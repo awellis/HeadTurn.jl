@@ -1,4 +1,3 @@
-using Parameters, Distributions, StatsPlots
 
 @with_kw struct Sensor
     noise::Distribution = Normal(0, 1.0)
@@ -10,18 +9,13 @@ end
     onset::Real = 0.0
 end
 
-@with_kw struct HeadTurn
-    A::Real = 20 # amplitude
-    D::String = "right" # direction
-    onset::Real = 1
-    duration::Real = 1
-end
 
-@with_kw struct PlannedMovement
+@with_kw struct PlannedHeadTurn
     A::Real = 20 # amplitude
     D::String = "right" # direction
     onset::Real = 1
     duration::Real = 1
+    @assert A > zero(A)
 end
 
 @with_kw struct ExternalDisturbance
@@ -32,13 +26,6 @@ end
 	@assert A > zero(A)
 end
 
-
-@with_kw struct Translation
-    A::Real = 20 # amplitude
-    D::String = "right" # direction
-    onset::Real = 1
-    duration::Real = 1
-end
 
 
 function cupula_dynamics(Δt::Real; τ::Real = 4)
@@ -69,6 +56,107 @@ end
 function peak_velocity(A::Number; T::Number = 1)
     (T/π) * A
 end
+
+
+function simulate(mᵤ::PlannedHeadTurn,
+    mₑ::ExternalDisturbance,
+    sensor::Sensor;
+    Δt = 0.01,
+    duration::Real = 5, 
+    stochastic::Bool = false)
+
+    mᵤ = @isdefined(mᵤ) ? mᵤ : PlannedHeadTurn(A = 0)
+    mₑ = @isdefined(mₑ) ? mₑ : ExternalDisturbance(A = 0)
+
+    onsetᵤ = mᵤ.onset
+    onsetₑ = mₑ.onset
+    @assert onsetᵤ >= 0
+    @assert onsetₑ >= 0
+    @assert duration > 0
+
+    # onset = m.onset
+    duration1 = mᵤ.duration
+    duration2 = mₑ.duration
+    total_duration = duration
+
+    onsetᵤ + duration1 <= total_duration || error("Head turn extends beyond simulation event.")
+    onsetₑ + duration2 <= total_duration || error("Disturbance extends beyond simulation event.")
+
+    mᵤ.D ∈ ["left", "right"] || error("Direction not specified.")
+    mₑ.D ∈ ["left", "right"] || error("Direction not specified.")
+
+
+    D1 = mᵤ.D == "left" ? -1 : 1
+    D2 = mₑ.D == "left" ? -1 : 1
+
+    # motion amplitude is noisy if stochastic simulation
+    A1 = stochastic == 0 ? mᵤ.A : rand(Normal(mᵤ.A, 2.0))
+    A2 = stochastic == 0 ? mₑ.A : rand(Normal(mₑ.A, 2.0))
+
+    noise = sensor.noise
+    f1 = 1/(duration1) # frequency: single sinusiodal head turn
+    f2 = 1/(duration2)
+
+    timesteps = range(0, stop = total_duration, step = Δt)
+    T = length(timesteps)
+
+    κ1, κ2 = cupula_dynamics(Δt)
+
+    α1 = zeros(T)
+    α2 = zeros(T)
+    α = zeros(T)
+    ω1 = zeros(T)
+    ω2 = zeros(T)
+    ω = zeros(T) # ω = Array{Float64}(undef, T) # velocity
+    θ = zeros(T)
+    c = zeros(T)
+    y = zeros(T)
+
+    for i ∈ Iterators.drop(1:T, 1)
+
+        t = round(timesteps[i]; digits = 3)
+
+        α1[i] = (t > onsetᵤ) & (t < onsetᵤ + duration1) ? acceleration(D1, A1, f1, t, onsetᵤ, noisy = stochastic) : 0
+        α2[i] = (t > onsetₑ) & (t < onsetₑ + duration2) ? acceleration(D2, A2, f2, t, onsetₑ, noisy = stochastic) : 0
+        α[i] = α1[i] + α2[i]
+        ω1[i] = ω1[i-1] + Δt * α1[i]
+        ω2[i] = ω2[i-1] + Δt * α2[i]
+
+        ω[i] =  ω1[i] + ω2[i]
+        θ[i] = θ[i-1] + Δt * ω[i] + 1/2 * Δt^2 * α[i]
+        c[i] = κ1 * c[i-1] + κ2 * ω[i]
+        y[i] = ω[i] - c[i] + rand(noise)
+    end
+    
+    out = (timesteps = collect(timesteps),
+            y = y,
+            αᵤ = α1, αₑ = α2, 
+            α = α, 
+            ωᵤ = ω1, ωₑ = ω2,
+            ω = ω, 
+            θ = θ, c = c, 
+            Δt = Δt, onsetᵤ = onsetᵤ, onsetₑ = onsetₑ,
+            sensor = noise, stochastic = stochastic)
+    return out
+
+end
+
+simulate(mᵤ::PlannedHeadTurn,
+    sensor::Sensor;
+    Δt = 0.01,
+    duration::Real = 5, 
+    stochastic::Bool = false) = simulate(mᵤ, ExternalDisturbance(A = 0, duration = 0.1), sensor, 
+        Δt = Δt, duration = duration, stochastic = stochastic)
+
+simulate(mₑ::ExternalDisturbance,
+    sensor::Sensor;
+    Δt = 0.01,
+    duration::Real = 5, 
+    stochastic::Bool = false) = simulate(PlannedHeadTurn(A = 0, duration = 0.1), mₑ, sensor, 
+        Δt = Δt, duration = duration, stochastic = stochastic)
+
+
+
 
 
 function simulate(m::NigmatullinaTrial, sensor::Sensor;
@@ -145,104 +233,3 @@ function simulate(m::NigmatullinaTrial, sensor::Sensor;
             Δt = Δt, onset = onset)
     return out
 end
-
-function simulate(mᵤ::HeadTurn,
-    mₑ::ExternalDisturbance,
-    sensor::Sensor;
-    Δt = 0.01,
-    duration::Real = 5, 
-    stochastic::Bool = false)
-
-    mᵤ = @isdefined(mᵤ) ? mᵤ : HeadTurn(A = 0)
-    mₑ = @isdefined(mₑ) ? mₑ : ExternalDisturbance(A = 0)
-
-    onsetᵤ = mᵤ.onset
-    onsetₑ = mₑ.onset
-    @assert onsetᵤ >= 0
-    @assert onsetₑ >= 0
-    @assert duration > 0
-
-    # onset = m.onset
-    duration1 = mᵤ.duration
-    duration2 = mₑ.duration
-    total_duration = duration
-
-    onsetᵤ + duration1 <= total_duration || error("Head turn extends beyond simulation event.")
-    onsetₑ + duration2 <= total_duration || error("Disturbance extends beyond simulation event.")
-
-    mᵤ.D ∈ ["left", "right"] || error("Direction not specified.")
-    mₑ.D ∈ ["left", "right"] || error("Direction not specified.")
-
-
-    D1 = mᵤ.D == "left" ? -1 : 1
-    D2 = mₑ.D == "left" ? -1 : 1
-
-    # motion amplitude is noisy if stochastic simulation
-    A1 = stochastic == 0 ? mᵤ.A : rand(Normal(mᵤ.A, 2.0))
-    A2 = stochastic == 0 ? mₑ.A : rand(Normal(mₑ.A, 2.0))
-
-    noise = sensor.noise
-    f1 = 1/(duration1) # frequency: single sinusiodal head turn
-    f2 = 1/(duration2)
-
-    timesteps = range(0, stop = total_duration, step = Δt)
-    T = length(timesteps)
-
-    κ1, κ2 = cupula_dynamics(Δt)
-
-    α1 = zeros(T)
-    α2 = zeros(T)
-    α = zeros(T)
-    ω1 = zeros(T)
-    ω2 = zeros(T)
-    ω = zeros(T) # ω = Array{Float64}(undef, T) # velocity
-    θ = zeros(T)
-    c = zeros(T)
-    y = zeros(T)
-
-    for i ∈ Iterators.drop(1:T, 1)
-
-        t = round(timesteps[i]; digits = 3)
-
-        α1[i] = (t > onsetᵤ) & (t < onsetᵤ + duration1) ? acceleration(D1, A1, f1, t, onsetᵤ, noisy = stochastic) : 0
-        α2[i] = (t > onsetₑ) & (t < onsetₑ + duration2) ? acceleration(D2, A2, f2, t, onsetₑ, noisy = stochastic) : 0
-        α[i] = α1[i] + α2[i]
-        ω1[i] = ω1[i-1] + Δt * α1[i]
-        ω2[i] = ω2[i-1] + Δt * α2[i]
-
-        ω[i] =  ω1[i] + ω2[i]
-        θ[i] = θ[i-1] + Δt * ω[i] + 1/2 * Δt^2 * α[i]
-        c[i] = κ1 * c[i-1] + κ2 * ω[i]
-        y[i] = ω[i] - c[i] + rand(noise)
-    end
-    
-    out = (timesteps = collect(timesteps),
-            y = y,
-            αᵤ = α1, αₑ = α2, 
-            α = α, 
-            ωᵤ = ω1, ωₑ = ω2,
-            ω = ω, 
-            θ = θ, c = c, 
-            Δt = Δt, onsetᵤ = onsetᵤ, onsetₑ = onsetₑ,
-            sensor = noise, stochastic = stochastic)
-    return out
-
-end
-
-simulate(mᵤ::HeadTurn,
-    sensor::Sensor;
-    Δt = 0.01,
-    duration::Real = 5, 
-    stochastic::Bool = false) = simulate(mᵤ, ExternalDisturbance(A = 0, duration = 0.1), sensor, 
-        Δt = Δt, duration = duration, stochastic = stochastic)
-
-simulate(mₑ::ExternalDisturbance,
-    sensor::Sensor;
-    Δt = 0.01,
-    duration::Real = 5, 
-    stochastic::Bool = false) = simulate(HeadTurn(A = 0, duration = 0.1), mₑ, sensor, 
-        Δt = Δt, duration = duration, stochastic = stochastic)
-
-
-
-
