@@ -15,7 +15,7 @@ end
     D::String = "right" # direction
     onset::Real = 1
     duration::Real = 1
-    @assert A > zero(A)
+    @assert A >= zero(A)
 end
 
 @with_kw struct ExternalDisturbance
@@ -23,7 +23,7 @@ end
     D::String = "right" # direction
     onset::Real = 1
     duration::Real = 2
-	@assert A > zero(A)
+	@assert A >= zero(A)
 end
 
 
