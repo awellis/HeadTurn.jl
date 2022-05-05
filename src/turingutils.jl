@@ -19,17 +19,17 @@ function get_omega(chain::Chains)
     w1 = Array(group(chain, :ω1))
     w2 = Array(group(chain, :ω2))
     w = w1 .+ w2
-    return (w = w, w1 = w1, w2 = w2)
+    return (w = w, wu = wu, we = we)
 end
 
 
 function summarize_omega(chain::Chains)
-    w1_array = Array(group(chain, :ω1))
-    w2_array = Array(group(chain, :ω2))
+    wu_array = Array(group(chain, :ωu))
+    we_array = Array(group(chain, :ωe))
     w_array = Array(group(chain, :ω))
 
     w = compute_stats(w_array)
-    w1 = compute_stats(w1_array)
-    w2 = compute_stats(w2_array)
-    return (w = w, w1 = w1, w2 = w2)
+    wu = compute_stats(wu_array)
+    we = compute_stats(we_array)
+    return (w = w, wu = wu, we = we)
 end
