@@ -32,4 +32,4 @@ function summarize_omega(chain::Chains)
     w1 = compute_stats(w1_array)
     w2 = compute_stats(w2_array)
     return (w = w, w1 = w1, w2 = w2)
-en
+end
