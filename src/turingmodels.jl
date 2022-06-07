@@ -134,167 +134,55 @@ end
     end
 end
 
-@model headturn_model(y, s, m, ::Type{T} = Float64; Δt = 0.01, σωᵤ = 0.01, σωₑ = 0.1) where {T} = begin
-    N = length(y)
-    # stochastic = s.stochastic
-    # intialize vectors
-    α1 = TArray{T}(undef, N)
-    ω1 = TArray{T}(undef, N)
-    p1 = TArray{T}(undef, N)
-    ω2 = TArray{T}(undef, N)
-    p2 = TArray{T}(undef, N)
-    ω = TArray{T}(undef, N)
-    p = TArray{T}(undef, N)
-    c = TArray{T}(undef, N)
+@model function headturnmodel(y, N; u, σωu, σωe, σy, timesteps, onsetᵤ, Du, Au, fu, duration_u, Δt, κ1=κ1, κ2=κ2) where {T}
+    ωu = tzeros(Real, N)
+    ωe = tzeros(Real, N)
+    ω = tzeros(Real, N)
+    c = tzeros(Real, N)
 
-    # parameters
-    D1 = m.D == "left" ? -1 : 1
-    A1 = stochastic == 0 ? m.A : rand(Normal(m.A, 0.5))
-    # A1 = rand(Normal(m.A, 0.5))
-    # A1 ~ Normal(m.A, 0.1)
-
-    # Δt = s.Δt
-    onsetᵤ = hasproperty(m, :onset) ? m.onset : 1.0
-    duration1 = m.duration
-    f1 = 1/(duration1) # frequency: single sinusiodal head turn
-    timesteps = range(0, stop = N, step = Δt)
-    κ1, κ2 = cupula_dynamics(Δt)
-
-    # priors
-    σy = 1.1 * s.sensor.σ # jitter the measurement noise
-    # σωᵤ ~ Truncated(Normal(0.5, 0.1))
-    # σωₑ ~ Truncated(Normal(0.5, 0.1))
-
-    # initial state at t_0
-    α1[1] = 0.0
-    ω1[1] ~ Normal(0, σωᵤ)
-    # p1[1] ~ Determin(ω1[1] > 0 ? 1 : 0)
-    ω2[1] ~ Normal(0, σωₑ)
-    # p2[1] ~ Determin(ω2[1] > 0 ? 1 : 0)
-    ω[1] = ω1[1] + ω2[1]
-    # p[1] ~ Determin(ω[1] > 0 ? 1 : 0)
+    ωu[1] ~ Normal(0, σωu)
+    ωe[1] ~ Normal(0, σωe)
+    ω[1] = ωu[1] + ωe[1]
     c[1] = κ1 * 0 + κ2 * ω[1]
     y[1] ~ Normal(ω[1] - c[1], σy)
 
     # for i ∈ Iterators.drop(1:N, 1)
     for i ∈ 2:N
-        t = round(timesteps[i]; digits = 3)
-        α1[i] = (t > onsetᵤ) & (t < onsetᵤ + duration1) ? acceleration(D1, A1, f1, t, onsetᵤ, noisy = stochastic) : 0.0
-
-        ω1[i] ~ Normal(ω1[i-1] + Δt * α1[i], σωᵤ)
-        # p1[i] ~ Determin(ω1[i] > 0 ? 1 : 0)
-        ω2[i] ~ Normal(ω2[i-1], σωₑ)
-        # p2[i] ~ Determin(ω2[i] > 0 ? 1 : 0)
-        ω[i] = ω1[i] + ω2[i]
-        # p[i] ~ Determin(ω[i] > 0 ? 1 : 0)
-
+        ωu[i] ~ Normal(ωu[i-1] + Δt * u[i], σωu)
+        ωe[i] ~ Normal(ωe[i-1], σωe)
+        ω[i] = ωu[i] + ωe[i]
         c[i] = κ1 * c[i-1] + κ2 * ω[i]
-        y[i] ~ Normal(ω[i] - c[i], σy)
+        y[i] ~ Normal(ω[i]-c[i], σy)
     end
     return (ω, c)
 end
 
-@model HeadTurnModel(y, s, m, ::Type{T} = Float64; σωᵤ = 0.01, σωₑ = 0.1) where {T} = begin
+function makeheadturnmodel(s; σωu=0.05, σωe=0.1)
+    y = s.y
     N = length(y)
-    stochastic = s.stochastic
-    # intialize vectors
-    α1 = TArray{T}(undef, N)
-    ω1 = TArray{T}(undef, N)
-    p1 = TArray{T}(undef, N)
-    ω2 = TArray{T}(undef, N)
-    p2 = TArray{T}(undef, N)
-    ω = TArray{T}(undef, N)
-    p = TArray{T}(undef, N)
-    c = TArray{T}(undef, N)
-
-    # parameters
-    D1 = m.D == "left" ? -1 : 1
-    A1 = stochastic == 0 ? m.A : rand(Normal(m.A, 0.5))
-    # A1 = rand(Normal(m.A, 0.5))
-    # A1 ~ Normal(m.A, 0.1)
-
+    Du = s.mᵤ.D == "left" ? -1 : 1
+    Au = s.mᵤ.A
+    σy = 1.0 * s.sensor.σ # inflate the measurement noise	
     Δt = s.Δt
-    onsetᵤ = hasproperty(m, :onset) ? m.onset : s.onsetᵤ
-    duration1 = m.duration
-    f1 = 1/(duration1) # frequency: single sinusiodal head turn
-    timesteps = range(0, stop = N, step = Δt)
-    κ1, κ2 = cupula_dynamics(Δt)
+    duration_u = s.mᵤ.duration
+    # onsetᵤ = hasproperty(s.mᵤ, :onset) ? s.mᵤ.onset : 1.0
+    onsetᵤ = s.mᵤ.onset
+    timesteps = range(0, stop=N * Δt, step=Δt)
+    fu = 1 / (duration_u) # frequency: single sinusoidal head turn
 
-    # priors
-    σy = 1.1 * s.sensor.σ # jitter the measurement noise
-    # σωᵤ ~ Truncated(Normal(0.5, 0.1))
-    # σωₑ ~ Truncated(Normal(0.5, 0.1))
-
-    # initial state at t_0
-    α1[1] = 0.0
-    ω1[1] ~ Normal(0, σωᵤ)
-    # p1[1] ~ Determin(ω1[1] > 0 ? 1 : 0)
-    ω2[1] ~ Normal(0, σωₑ)
-    # p2[1] ~ Determin(ω2[1] > 0 ? 1 : 0)
-    ω[1] ~ Determin(ω1[1] + ω2[1])
-    # p[1] ~ Determin(ω[1] > 0 ? 1 : 0)
-    c[1] ~ Determin(κ1 * 0 + κ2 * ω[1])
-    y[1] ~ Normal(ω[1] - c[1], σy)
-
-    # for i ∈ Iterators.drop(1:N, 1)
+    u = zeros(N)
     for i ∈ 2:N
-        t = round(timesteps[i]; digits = 3)
-        α1[i] = (t > onsetᵤ) & (t < onsetᵤ + duration1) ? acceleration(D1, A1, f1, t, onsetᵤ, noisy = stochastic) : 0.0
-
-        ω1[i] ~ Normal(ω1[i-1] + Δt * α1[i], σωᵤ)
-        # p1[i] ~ Determin(ω1[i] > 0 ? 1 : 0)
-        ω2[i] ~ Normal(ω2[i-1], σωₑ)
-        # p2[i] ~ Determin(ω2[i] > 0 ? 1 : 0)
-        ω[i] ~ Determin(ω1[i] + ω2[i])
-        # p[i] ~ Determin(ω[i] > 0 ? 1 : 0)
-
-        c[i] ~ Determin(κ1 * c[i-1] + κ2 * ω[i])
-        y[i] ~ Normal(ω[i] - c[i], σy)
+        t = timesteps[i]
+        u[i] = (t >= onsetᵤ) && (t <= onsetᵤ + duration_u) ? acceleration(Du, Au, fu, t, onsetᵤ) : 0.0
     end
-end
 
-
-
-@model HeadTurnOnlyModel(y, s, m; σωᵤ = 0.01) = begin
-    N = length(y)
-    stochastic = s.stochastic
-    # intialize vectors
-    α1 = tzeros(Real, N)
-    ω = tzeros(Real, N)
-    p = tzeros(Real, N)
-    c = zeros(Real, N)
-
-    # parameters
-    D1 = m.D == "left" ? -1 : 1
-    # A1 = stochastic == 0 ? m.A : rand(Normal(m.A, 0.5))
-    A1 = rand(Normal(m.A, 0.5))
-
-    Δt = s.Δt
-    onsetᵤ = hasproperty(m, :onset) ? m.onset : s.onsetᵤ
-    duration1 = m.duration
-    f1 = 1/(duration1) # frequency: single sinusiodal head turn
-    timesteps = range(0, stop = N, step = Δt)
     κ1, κ2 = cupula_dynamics(Δt)
 
-    # priors
-    σy = s.sensor.σ
-    
-    # initial state at t_0
-    ω[1] ~ Normal(0, σωᵤ)
-    p[1] ~ Determin(ω[1] > 0 ? 1 : 0)
-    c[1] ~ Determin(κ1 * 0 + κ2 * ω[1])
-    y[1] ~ Normal(ω[1] - c[1], σy)
-
-    for i ∈ Iterators.drop(1:N, 1)
-        t = round(timesteps[i]; digits = 3)
-        α1[i] = (t > onsetᵤ) & (t < onsetᵤ + duration1) ? acceleration(D1, A1, f1, t, onsetᵤ, noisy = stochastic) : 0.0
-
-        ω[i] ~ Normal(ω[i-1] + Δt * α1[i], σωᵤ)
-        p[i] ~ Determin(ω[i] > 0 ? 1 : 0)
-        c[i] ~ Determin(κ1 * c[i-1] + κ2 * ω[i])
-        y[i] ~ Normal(ω[i] - c[i], σy)
-    end
+    model = headturnmodel(y, N, u=u, σωu=σωu, σωe=σωe, σy=σy, timesteps=timesteps, onsetᵤ=onsetᵤ, Du=Du, Au=Au, fu=fu, duration_u=duration_u, Δt=Δt, κ1=κ1, κ2=κ2)
 end
+
+
+
 
 
 @model HeadTurnOnlyParamModel(y, s, m; σωᵤ = 0.01, σₐ = 1.0) = begin
